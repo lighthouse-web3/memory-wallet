@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Memory Wallet · Options</title>
+    <style>
+      body { margin: 0; padding: 28px; background: #101012; color: #f4f2f7; font: 14px/1.5 'DM Sans', system-ui, sans-serif; }
+      h1 { font-size: 20px; font-weight: 500; margin: 0 0 6px; }
+      p { color: #a6a1b2; margin: 0 0 16px; }
+      label { display: block; margin-bottom: 6px; color: #bbb5c7; }
+      input { width: 100%; max-width: 420px; padding: 10px 12px; border-radius: 10px; border: 1px solid #ddccff30; background: #0d0c10; color: #f4f2f7; font: inherit; }
+      button { margin-top: 12px; padding: 10px 16px; border: 0; border-radius: 9px; font: inherit; font-weight: 600; color: #21182f; background: linear-gradient(110deg, #d4b8fd, #bdc1ff); cursor: pointer; }
+      #saved { color: #8fe3c0; margin-left: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>Memory Wallet</h1>
+    <p>Where your vault runs. The extension opens it in a window and talks to it; the vault holds your key.</p>
+    <label for="url">Vault URL</label>
+    <input id="url" placeholder="http://localhost:5173" />
+    <button id="save">Save</button><span id="saved"></span>
+    <script src="options.js"></script>
+  </body>
+</html>

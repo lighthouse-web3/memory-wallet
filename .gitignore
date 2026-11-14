@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.local
+apps/*/.env.local
+.data/
+contract/target/
+*.log
+.DS_Store
+.claude/

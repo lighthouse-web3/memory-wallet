@@ -1,0 +1,30 @@
+[package]
+name = "memory-wallet-registry"
+description = "Memory Wallet registry: where each account's encrypted memory lives, and which apps it has let in"
+version = "0.1.0"
+edition = "2024"
+resolver = "3"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[package.metadata.near.reproducible_build]
+image = "sourcescan/cargo-near:0.19.0-rust-1.86.0"
+image_digest = "sha256:772638e343baeeea24e49062c7d424274f3441452cc06ce97fc4e5695b19fecc"
+passed_env = []
+container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "--locked"]
+
+[dependencies]
+near-sdk = "5.24"
+
+[dev-dependencies]
+near-sdk = { version = "5.24", features = ["unit-testing"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true

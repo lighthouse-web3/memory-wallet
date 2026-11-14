@@ -1,0 +1,21 @@
+{
+  "name": "memory-wallet",
+  "private": true,
+  "type": "module",
+  "description": "A wallet for your AI memory: encrypted in your browser, stored on Lighthouse, shared with apps through NEAR, answered inside NEAR AI's TEEs.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "workspaces": [
+    "packages/*",
+    "relay",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present"
+  }
+}
