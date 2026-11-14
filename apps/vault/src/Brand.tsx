@@ -32,15 +32,6 @@ export function Backdrop() {
   )
 }
 
-export function Eyebrow({ children }: { children: ReactNode }) {
-  return (
-    <div className="eyebrow">
-      <span className="mini-mark" />
-      {children}
-    </div>
-  )
-}
-
 export function Footer() {
   return (
     <footer className="foot">

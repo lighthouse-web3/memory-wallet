@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Eyebrow, Footer, TopBar } from './Brand.tsx'
+import { Footer, TopBar } from './Brand.tsx'
 import { config } from './config.ts'
 import { errorText } from './format.ts'
 import { unlock, type Unlocked } from './session.ts'
@@ -30,7 +30,6 @@ export function UnlockScreen(props: {
     <main className="unlock">
       <TopBar />
       <section className="hero">
-      <Eyebrow>Private memory for every AI app</Eyebrow>
       {props.forApp ? (
         <h1>
           {props.forApp} wants

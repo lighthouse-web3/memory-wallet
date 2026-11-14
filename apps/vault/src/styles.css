@@ -268,24 +268,6 @@ input[type='radio'] {
   color: var(--muted);
   padding: 24px 0;
 }
-.eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  letter-spacing: 2px;
-  font-weight: 600;
-  color: var(--eyebrow);
-  text-transform: uppercase;
-}
-.mini-mark {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #d5b5ff;
-  box-shadow: 0 0 15px #c794ff;
-  flex-shrink: 0;
-}
 .gradient {
   background: var(--heading-gradient);
   -webkit-background-clip: text;
@@ -304,14 +286,11 @@ input[type='radio'] {
   text-align: center;
   padding: 72px 0 8px;
 }
-.hero .eyebrow {
-  justify-content: center;
-}
 .unlock h1 {
   font-size: clamp(40px, 6.4vw, 78px);
   line-height: 1.04;
   letter-spacing: -0.045em;
-  margin: 22px auto 22px;
+  margin: 8px auto 22px;
 }
 .lede {
   max-width: 640px;

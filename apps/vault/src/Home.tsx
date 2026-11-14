@@ -1,6 +1,6 @@
 import { rankMemories, RelayBlobStore, type ChatMessage, type RecallHit, type ReplyProof, type ScopedMemory } from '@memory-wallet/core'
 import { useMemo, useReducer, useState } from 'react'
-import { Eyebrow, Footer, TopBar } from './Brand.tsx'
+import { Footer, TopBar } from './Brand.tsx'
 import { config, SUGGESTED_SCOPES } from './config.ts'
 import { embedder, embedQuery } from './embedder.ts'
 import { errorText, relative, short } from './format.ts'
@@ -35,7 +35,6 @@ export function Home({ u, onLock }: { u: Unlocked; onLock: () => void }) {
         </nav>
       </TopBar>
       <div className="page-head">
-        <Eyebrow>{HEADINGS[tab].eyebrow}</Eyebrow>
         <h1>
           {HEADINGS[tab].title} <span className="gradient">{HEADINGS[tab].accent}</span>
         </h1>
@@ -55,10 +54,10 @@ export function Home({ u, onLock }: { u: Unlocked; onLock: () => void }) {
   )
 }
 
-const HEADINGS: Record<Tab, { eyebrow: string; title: string; accent: string }> = {
-  memories: { eyebrow: 'Sealed in this browser', title: 'Your memories,', accent: 'encrypted before they leave.' },
-  apps: { eyebrow: 'Grants on NEAR', title: 'Apps you let in,', accent: 'revocable any time.' },
-  chat: { eyebrow: 'NEAR AI · Intel TDX + NVIDIA TEE', title: 'Ask privately,', accent: 'verified in your browser.' },
+const HEADINGS: Record<Tab, { title: string; accent: string }> = {
+  memories: { title: 'Your memories,', accent: 'encrypted before they leave.' },
+  apps: { title: 'Apps you let in,', accent: 'revocable any time.' },
+  chat: { title: 'Ask privately,', accent: 'verified in your browser.' },
 }
 
 function Memories({ u, onChange }: { u: Unlocked; onChange: () => void }) {
