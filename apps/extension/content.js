@@ -10,7 +10,7 @@
   if (window.__memoryWalletLoaded) return
   window.__memoryWalletLoaded = true
 
-  const DEFAULT_VAULT = 'http://localhost:5173'
+  const DEFAULT_VAULT = 'https://lighthouse-memory-wallet.vercel.app'
   /** What every chat app asks for. Health stays out unless you add it in the vault. */
   const SCOPES = ['preferences', 'travel', 'food', 'work', 'venice']
   const SAVE_SCOPES = ['preferences', 'travel', 'food', 'work']

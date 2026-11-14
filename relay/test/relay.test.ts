@@ -5,18 +5,19 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { createRelay } from '../src/app.ts'
+import { createRelay, type RelayLimits } from '../src/app.ts'
 import { LocalSealedStore, cidV1Raw } from '../src/storage.ts'
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString('hex')
 const modelKey = hex(ed25519.getPublicKey(ed25519.utils.randomSecretKey()))
 const clientKey = hex(ed25519.getPublicKey(ed25519.utils.randomSecretKey()))
 
-async function relay(opts: { apiKey?: string; upstream?: typeof fetch } = {}) {
+async function relay(opts: { apiKey?: string; upstream?: typeof fetch; limits?: RelayLimits } = {}) {
   const store = new LocalSealedStore(await mkdtemp(join(tmpdir(), 'mw-relay-')))
   const calls: { url: string; init: RequestInit }[] = []
   const app = createRelay({
     store,
+    limits: opts.limits,
     corsOrigins: ['http://localhost:5173'],
     nearai: { baseUrl: 'https://nearai.test', apiKey: opts.apiKey ?? '' },
     log: () => {},
@@ -95,4 +96,23 @@ test('without a NEAR AI key, chat is off', async () => {
 
 test('local CIDs are CIDv1 raw sha2-256', () => {
   assert.equal(cidV1Raw(new TextEncoder().encode('hello')), 'bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq')
+})
+
+test('public guardrails: model allowlist, max_tokens cap, per-IP rate limit', async () => {
+  const { app, calls } = await relay({ apiKey: 'k', limits: { models: ['z-ai/glm-5.3-flash'], maxTokens: 2000, chatPerMinute: 2 } })
+  const msg = [{ role: 'user', content: encryptToEd25519('hi', modelKey) }]
+  const post = (body: object, ip = '1.2.3.4') =>
+    app.request('/nearai/v1/chat/completions', { method: 'POST', headers: { ...e2eeHeaders, 'x-forwarded-for': ip }, body: JSON.stringify(body) })
+
+  assert.equal((await post({ model: 'some/expensive-model', max_tokens: 100, messages: msg }, '9.9.9.1')).status, 400)
+  assert.equal((await post({ model: 'z-ai/glm-5.3-flash', messages: msg }, '9.9.9.2')).status, 400)
+  assert.equal((await post({ model: 'z-ai/glm-5.3-flash', max_tokens: 50_000, messages: msg }, '9.9.9.3')).status, 400)
+  assert.equal(calls.length, 0)
+
+  const ok = { model: 'z-ai/glm-5.3-flash', max_tokens: 500, messages: msg }
+  assert.equal((await post(ok)).status, 200)
+  assert.equal((await post(ok)).status, 200)
+  assert.equal((await post(ok)).status, 429)
+  assert.equal((await post(ok, '5.6.7.8')).status, 200, 'other clients are not affected')
+  assert.equal(calls.length, 3)
 })

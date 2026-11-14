@@ -8,3 +8,6 @@ contract/target/
 *.log
 .DS_Store
 .claude/
+# Vercel: link info and prebuilt output (scripts/vercel-build.mjs)
+.vercel/
+.env*.local

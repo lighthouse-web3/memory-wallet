@@ -4,7 +4,12 @@
 
 Built for the NEAR HACKATHON (Nov 2026) · Track: **Privacy & Private AI** (also Open Innovation).
 
-**Live on NEAR testnet:** registry contract [`lighthouse-memory-wallet.testnet`](https://testnet.nearblocks.io/address/lighthouse-memory-wallet.testnet).
+**Try it live**
+
+- Vault: **https://lighthouse-memory-wallet.vercel.app** (memories stored on Lighthouse, private chat through NEAR AI)
+- Demo app on another origin: **https://memory-wallet-wanderly.vercel.app**
+- Registry contract on NEAR testnet: [`lighthouse-memory-wallet.testnet`](https://testnet.nearblocks.io/address/lighthouse-memory-wallet.testnet)
+- Extension for ChatGPT, NEAR AI Private Chat and Venice: [`apps/extension`](apps/extension) (load unpacked; it opens the hosted vault)
 
 Readable memories exist only in **your browser**, in **an Intel TDX + NVIDIA enclave your browser has just verified**, and in **the apps you explicitly let read them** (a "reveal" grant, public on-chain, where you tick each memory before it leaves). Lighthouse, the relay and NEAR AI's operators handle only ciphertext.
 
@@ -41,7 +46,7 @@ Needs Node.js 20.19+.
 
 ```bash
 npm ci
-npm test        # core: 18 tests, relay: 6 tests
+npm test        # core: 18 tests, relay: 7 tests
 npm run dev     # relay :8787, vault :5173, demo app :5174
 ```
 
@@ -70,7 +75,7 @@ Choose **Connect NEAR wallet** (HOT, Meteor, MyNearWallet… via NEAR Connect) o
 `apps/extension` is a Chrome extension (Manifest V3, no build step).
 
 1. `chrome://extensions` → turn on **Developer mode** → **Load unpacked** → pick `apps/extension`.
-2. Keep `npm run dev` running (the extension opens your vault at http://localhost:5173; change it in the extension's options).
+2. The extension opens the hosted vault, https://lighthouse-memory-wallet.vercel.app. To use your own, run `npm run dev` and set `http://localhost:5173` in the extension's options.
 3. Open chatgpt.com, private.near.ai or venice.ai. Click **Memory** (bottom right) → **Connect Memory Wallet**. The vault opens in a window: unlock, read what the site asks for, and grant it (on NEAR with a wallet).
 4. Type your message, click **Find memories for this message**. The vault window shows what Lighthouse Memory recalled from the granted scopes; tick what to share. Only ticked memories reach the page. Click **Insert** to add them to your message.
 5. Select text in a chat and **Save** it to a scope. It's encrypted in your wallet and available in the other apps you've granted.
@@ -78,6 +83,22 @@ Choose **Connect NEAR wallet** (HOT, Meteor, MyNearWallet… via NEAR Connect) o
 7. Revoke a site in the vault's **Apps** tab: its next request is refused.
 
 What a site asks for by default: `preferences`, `travel`, `food`, `work`, `venice` — read, write, and **reveal** (the site sees the text of memories you share). `health` and other scopes stay out unless you grant them.
+
+## Deploy to Vercel
+
+Two projects: the vault with its relay as one function at `/api` (same origin, no CORS), and Wanderly on its own domain, because it plays a third-party app.
+
+```bash
+npx vercel link --project <vault-project>                 # at the repo root
+npx vercel env add NEARAI_API_KEY production --sensitive  # also LIGHTHOUSE_API_KEY (needed: functions have no lasting disk)
+node scripts/vercel-build.mjs vault && npx vercel deploy --prebuilt --prod
+
+cd apps/demo-travel && npx vercel link --project <wanderly-project> && cd ../..
+MW_VAULT_URL=https://<vault-domain> node scripts/vercel-build.mjs wanderly
+npx vercel deploy --prebuilt --prod --cwd apps/demo-travel
+```
+
+The hosted relay adds guardrails, because its NEAR AI key spends real credits: only `z-ai/glm-5.3-flash`, `max_tokens` required and capped at 2000, 256 KB per chat request, and a per-IP rate limit (`relay/src/vercel.ts`).
 
 ## Deploy your own registry
 
@@ -134,14 +155,15 @@ Then set `VITE_CONTRACT_ID=<name>.testnet` and restart `npm run dev`.
 - **On-device recall** uses the SDK's keyword tokenizer, which is ASCII-only. The embedding model downloads from Hugging Face on first use.
 - **Not yet verified:** NVIDIA GPU evidence (present in the report; NRAS verification is TODO) and gateway-kind signatures (the vault only accepts `provider_tee` signatures). An attestation is reused for 5 minutes.
 - **Forgetting** removes a memory from the next snapshot. Older snapshots stay on IPFS/Filecoin, encrypted.
-- **Testnet scaffolding:** the contract pays its own storage, and the relay has no rate limiting.
+- **Testnet scaffolding:** the contract pays its own storage. The hosted relay's rate limit is per instance (a speed bump, not a quota), and anyone can upload sealed blobs of up to 2 MiB to its Lighthouse account.
 
 ## Repo layout
 
 ```
 contract/          NEAR registry contract (Rust, near-sdk 5) — deployed at lighthouse-memory-wallet.testnet
 packages/core/     keys, sealed snapshots, Lighthouse Memory records + recall, NEAR AI E2EE + attestation, registry client, bridge protocol
-relay/             Hono server: ciphertext-only storage on Lighthouse + NEAR AI forwarding
+relay/             Hono server: ciphertext-only storage on Lighthouse + NEAR AI forwarding (also a Vercel function)
+scripts/           dev runner and the Vercel build (Build Output API)
 apps/vault/        the Memory Wallet (React + Vite, NEAR Connect, Lighthouse look)
 apps/demo-travel/  Wanderly, a third-party AI app that only ever gets TEE answers
 apps/extension/    Chrome extension for ChatGPT, NEAR AI Private Chat and Venice

@@ -17,8 +17,39 @@ export interface RelayConfig {
   store: SealedStore
   corsOrigins: string[]
   nearai: { baseUrl: string; apiKey: string }
+  /** Guardrails for a public deployment (the NEAR AI key spends real credits). Off when omitted. */
+  limits?: RelayLimits
   fetchImpl?: typeof fetch
   log?: (line: string) => void
+}
+
+export interface RelayLimits {
+  /** Only these model ids may be called. */
+  models?: string[]
+  /** Every chat request must set max_tokens, at most this. */
+  maxTokens?: number
+  /** Chat request body size cap, in bytes. */
+  maxChatBytes?: number
+  /** Requests per minute per client IP (x-forwarded-for), per instance. */
+  chatPerMinute?: number
+  blobsPerMinute?: number
+}
+
+/** A fixed-window counter per key. Per instance, so it's a speed bump, not a quota. */
+function rateLimiter(perMinute: number | undefined) {
+  const windows = new Map<string, { start: number; count: number }>()
+  return (key: string): boolean => {
+    if (!perMinute) return true
+    const now = Date.now()
+    const w = windows.get(key)
+    if (!w || now - w.start >= 60_000) {
+      if (windows.size > 10_000) windows.clear()
+      windows.set(key, { start: now, count: 1 })
+      return true
+    }
+    w.count++
+    return w.count <= perMinute
+  }
 }
 
 const CID = /^[a-zA-Z0-9]{8,100}$/
@@ -29,6 +60,10 @@ export function createRelay(cfg: RelayConfig) {
   const app = new Hono()
   const upstream = cfg.fetchImpl ?? fetch
   const log = cfg.log ?? ((line: string) => console.log(line))
+  const limits = cfg.limits ?? {}
+  const chatAllowed = rateLimiter(limits.chatPerMinute)
+  const blobsAllowed = rateLimiter(limits.blobsPerMinute)
+  const clientIp = (c: { req: { header(name: string): string | undefined } }) => (c.req.header('x-forwarded-for') ?? 'local').split(',')[0]!.trim()
 
   app.use('*', cors({ origin: cfg.corsOrigins, allowHeaders: ['content-type', 'x-no-aliasing', ...FORWARDED_E2EE_HEADERS], maxAge: 600 }))
   app.use('*', async (c, next) => {
@@ -40,6 +75,7 @@ export function createRelay(cfg: RelayConfig) {
   app.get('/health', (c) => c.json({ ok: true, storage: cfg.store.name, nearai: Boolean(cfg.nearai.apiKey) }))
 
   app.post('/blobs', async (c) => {
+    if (!blobsAllowed(clientIp(c))) return c.json({ error: 'too many uploads; try again in a minute' }, 429)
     const declared = Number(c.req.header('content-length') ?? '0')
     if (declared > MAX_SEALED_BYTES) return c.json({ error: 'blob too large' }, 413)
     const body = new Uint8Array(await c.req.arrayBuffer())
@@ -80,6 +116,7 @@ export function createRelay(cfg: RelayConfig) {
 
   app.post('/nearai/v1/chat/completions', async (c) => {
     if (!cfg.nearai.apiKey) return c.json({ error: 'This relay has no NEARAI_API_KEY, so private inference is off.' }, 503)
+    if (!chatAllowed(clientIp(c))) return c.json({ error: 'too many requests; try again in a minute' }, 429)
 
     if (c.req.header('x-encryption-version') !== '2' || c.req.header('x-signing-algo') !== 'ed25519') {
       return c.json({ error: 'plaintext refused: send X-Encryption-Version: 2 and X-Signing-Algo: ed25519' }, 400)
@@ -89,7 +126,8 @@ export function createRelay(cfg: RelayConfig) {
     }
 
     const raw = await c.req.text()
-    let body: { messages?: { content?: unknown }[]; stream?: unknown; tools?: unknown; functions?: unknown }
+    if (limits.maxChatBytes && raw.length > limits.maxChatBytes) return c.json({ error: 'request too large' }, 413)
+    let body: { model?: unknown; max_tokens?: unknown; messages?: { content?: unknown }[]; stream?: unknown; tools?: unknown; functions?: unknown }
     try {
       body = JSON.parse(raw)
     } catch {
@@ -101,6 +139,12 @@ export function createRelay(cfg: RelayConfig) {
     }
     if (body.tools || body.functions) return c.json({ error: 'tools are not encrypted in this mode; refused' }, 400)
     if (body.stream) return c.json({ error: 'streaming is not supported by this relay yet' }, 400)
+    if (limits.models && !limits.models.includes(String(body.model))) {
+      return c.json({ error: `this relay only serves ${limits.models.join(', ')}` }, 400)
+    }
+    if (limits.maxTokens && !(typeof body.max_tokens === 'number' && body.max_tokens > 0 && body.max_tokens <= limits.maxTokens)) {
+      return c.json({ error: `set max_tokens (at most ${limits.maxTokens})` }, 400)
+    }
 
     const headers: Record<string, string> = {
       authorization: `Bearer ${cfg.nearai.apiKey}`,

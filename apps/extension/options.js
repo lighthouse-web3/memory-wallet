@@ -1,5 +1,5 @@
 const input = document.getElementById('url')
-chrome.storage.sync.get({ vaultUrl: 'http://localhost:5173' }, (v) => (input.value = v.vaultUrl))
+chrome.storage.sync.get({ vaultUrl: 'https://lighthouse-memory-wallet.vercel.app' }, (v) => (input.value = v.vaultUrl))
 document.getElementById('save').addEventListener('click', () => {
   let url
   try {
