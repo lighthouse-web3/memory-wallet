@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Memory Wallet by Lighthouse",
   "short_name": "Memory Wallet",
-  "version": "0.1.0",
-  "description": "Carry your encrypted Lighthouse memory between ChatGPT, NEAR AI Private Chat and Venice. Your NEAR wallet holds the key; you grant and revoke each app on NEAR.",
+  "version": "0.2.0",
+  "description": "Carry your encrypted Lighthouse memory between ChatGPT, Grok, Gemini, Perplexity, NEAR AI, Venice and more. Your NEAR wallet holds the key; you grant and revoke each app on NEAR.",
   "icons": {
     "16": "icons/icon-16.png",
     "48": "icons/icon-48.png",
@@ -18,7 +18,21 @@
         "https://chat.openai.com/*",
         "https://private.near.ai/*",
         "https://chat.near.ai/*",
-        "https://venice.ai/*"
+        "https://venice.ai/*",
+        "https://grok.com/*",
+        "https://x.com/i/grok*",
+        "https://gemini.google.com/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*",
+        "https://chat.deepseek.com/*",
+        "https://copilot.microsoft.com/*",
+        "https://copilot.com/*",
+        "https://www.copilot.com/*",
+        "https://www.meta.ai/*",
+        "https://meta.ai/*",
+        "https://chat.qwen.ai/*",
+        "https://www.kimi.com/*",
+        "https://kimi.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"

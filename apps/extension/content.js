@@ -11,17 +11,31 @@
   window.__memoryWalletLoaded = true
 
   const DEFAULT_VAULT = 'https://lighthouse-memory-wallet.vercel.app'
-  /** What every chat app asks for. Health stays out unless you add it in the vault. */
-  const SCOPES = ['preferences', 'travel', 'food', 'work', 'venice']
-  const SAVE_SCOPES = ['preferences', 'travel', 'food', 'work']
+  /** "*" = you pick the scopes in your vault (custom ones too); Venice also needs its own scope for imports. */
+  const ANY_SCOPE = '*'
   const SITES = {
-    'chatgpt.com': { name: 'ChatGPT', tee: false },
-    'chat.openai.com': { name: 'ChatGPT', tee: false },
+    'chatgpt.com': { name: 'ChatGPT' },
+    'chat.openai.com': { name: 'ChatGPT' },
     'private.near.ai': { name: 'NEAR AI Private Chat', tee: true },
     'chat.near.ai': { name: 'NEAR AI Private Chat', tee: true },
-    'venice.ai': { name: 'Venice', tee: false, venice: true },
+    'venice.ai': { name: 'Venice', venice: true },
+    'grok.com': { name: 'Grok' },
+    'x.com': { name: 'Grok' },
+    'gemini.google.com': { name: 'Gemini' },
+    'www.perplexity.ai': { name: 'Perplexity' },
+    'perplexity.ai': { name: 'Perplexity' },
+    'chat.deepseek.com': { name: 'DeepSeek' },
+    'copilot.microsoft.com': { name: 'Copilot' },
+    'copilot.com': { name: 'Copilot' },
+    'www.copilot.com': { name: 'Copilot' },
+    'www.meta.ai': { name: 'Meta AI' },
+    'meta.ai': { name: 'Meta AI' },
+    'chat.qwen.ai': { name: 'Qwen' },
+    'www.kimi.com': { name: 'Kimi' },
+    'kimi.com': { name: 'Kimi' },
   }
-  const site = SITES[location.hostname] || { name: location.hostname, tee: false }
+  const site = SITES[location.hostname] || { name: location.hostname }
+  const SCOPES = site.venice ? [ANY_SCOPE, 'venice'] : [ANY_SCOPE]
   const APP = location.origin
 
   const state = {
@@ -34,6 +48,7 @@
     noteKind: '',
     busy: '',
     lastSelection: '',
+    saveScope: 'preferences',
   }
   const pending = new Map()
 
@@ -127,13 +142,21 @@
 
   const composerText = (el) => (el ? (el.tagName === 'TEXTAREA' ? el.value : el.innerText || '') : '').trim()
 
+  /**
+   * Puts text at the end of the chat box and checks it landed. Plain text boxes get the value set
+   * the way React expects; rich editors (ProseMirror, Lexical, Quill, Slate…) get a paste, then
+   * insertText. Returns false if neither worked, so the caller can fall back to the clipboard.
+   */
   function insert(el, text) {
+    const probe = text.split('\n').pop().slice(0, 40)
+    const landed = () => composerText(el).includes(probe)
     el.focus()
-    if (el.tagName === 'TEXTAREA') {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set
+    if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value').set
       setter.call(el, el.value.trim() ? `${el.value}\n\n${text}` : text)
       el.dispatchEvent(new Event('input', { bubbles: true }))
-      return true
+      return landed()
     }
     const range = document.createRange()
     range.selectNodeContents(el)
@@ -141,12 +164,28 @@
     const sel = window.getSelection()
     sel.removeAllRanges()
     sel.addRange(range)
-    const payload = el.innerText.trim() ? `\n\n${text}` : text
-    // Rich editors (ProseMirror, Lexical) handle a paste with line breaks best.
+    const payload = composerText(el) ? `\n\n${text}` : text
     const data = new DataTransfer()
     data.setData('text/plain', payload)
-    const pasted = !el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
-    return pasted || document.execCommand('insertText', false, payload)
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+    if (landed()) return true
+    document.execCommand('insertText', false, payload)
+    return landed()
+  }
+
+  /**
+   * The plain fact, for the chat: drops labels added by older imports ("Asked Venice: …"), turns
+   * "save it in memory that X" into "X", and drops bare memory commands ("recall all my memories").
+   */
+  function cleanMemory(text) {
+    let t = String(text || '')
+      .replace(/^(asked venice|venice chat|summary of a venice chat|history with venice|inside reference with venice)\s*:\s*/i, '')
+      .trim()
+    t = t.replace(/^(please\s+)?(save|remember|store|note|add)\b[^a-z0-9]*(it|this)?\s*(in|to|into)?\s*(my|your)?\s*(memory|memories)?\s*(that\s+)?[:,-]?\s*/i, (m) => (/memor|that/i.test(m) ? '' : m)).trim()
+    if (/^(please\s+)?(recall|show|list|tell me|what (are|is|do you)|do you (remember|know))\b.*\bmemor/i.test(t)) return ''
+    if (/^(recall|remember)\s+(all|everything)\b/i.test(t)) return ''
+    if (/^(what|do|does|can|could)\b.*\b(remember|know)\b.*\b(about )?(me|my)\b.*\??$/i.test(t) && t.length < 80) return ''
+    return t ? t[0].toUpperCase() + t.slice(1) : ''
   }
 
   document.addEventListener('selectionchange', () => {
@@ -173,14 +212,21 @@
   }
 
   function insertPicked() {
-    const picked = state.hits.filter((h) => h.picked)
+    const lines = [...new Map(state.hits.filter((h) => h.picked).map((h) => cleanMemory(h.text)).filter(Boolean).map((t) => [t.toLowerCase(), t])).values()]
+    if (!lines.length) return note('Nothing to insert: the picked memories were only memory commands.', 'bad')
+    const block = ['Context from my Memory Wallet (shared by me):', ...lines.map((t) => `- ${t}`)].join('\n')
     const el = findComposer()
-    if (!el) return note('Could not find the chat box on this page. Click into it, then try again.', 'bad')
-    const block = ['Context from my Memory Wallet (shared by me):', ...picked.map((h) => `- ${h.text}`)].join('\n')
-    insert(el, block)
-    note(`Inserted ${picked.length} ${picked.length === 1 ? 'memory' : 'memories'}. ${site.tee ? '' : `${site.name} will see them when you send.`}`)
-    panel.hidden = true
-    el.focus()
+    if (el && insert(el, block)) {
+      note(`Inserted ${lines.length} ${lines.length === 1 ? 'memory' : 'memories'}. ${site.tee ? '' : `${site.name} will see them when you send.`}`)
+      panel.hidden = true
+      el.focus()
+      return
+    }
+    // Last resort: hand it over through the clipboard.
+    navigator.clipboard.writeText(block).then(
+      () => note(`Copied ${lines.length} ${lines.length === 1 ? 'memory' : 'memories'}. Click into the chat box and press ⌘V (Ctrl+V).`),
+      () => note("Couldn't reach this site's chat box. Click into it and try Insert again.", 'bad'),
+    )
   }
 
   async function saveSelection(scope) {
@@ -197,12 +243,18 @@
     await run('venice', async () => {
       const found = await readVeniceMemories()
       const c = found.counts
-      const seen = `${c.memories} memory ${c.memories === 1 ? 'chunk' : 'chunks'}, ${c.profile} profile and ${c.relationship} relationship ${c.profile + c.relationship === 1 ? 'record' : 'records'}`
+      const parts = [
+        c.chats && `${c.chats} ${c.chats === 1 ? 'chat' : 'chats'} (${c.messages} of your messages)`,
+        c.memories && `${c.memories} memory ${c.memories === 1 ? 'chunk' : 'chunks'}`,
+        c.profile && `${c.profile} profile ${c.profile === 1 ? 'record' : 'records'}`,
+        c.relationship && `${c.relationship} relationship ${c.relationship === 1 ? 'record' : 'records'}`,
+      ].filter(Boolean)
+      const seen = parts.join(', ') || 'nothing'
       if (!found.texts.length) {
         return note(
-          c.memories + c.profile + c.relationship
+          parts.length
             ? `Found ${seen} in Venice's storage here, but no readable text (Venice may encrypt them in this browser).`
-            : "Venice hasn't stored any memory in this browser yet (checked its memories, profile insights and relationship insights). Chat a little with Memory on, then try again.",
+            : "Venice hasn't stored any chats or memory in this browser yet (checked its chats, memories, profile and relationship insights).",
           'bad',
         )
       }
@@ -222,13 +274,15 @@
    *  - entityInsights (entityType "user"): what Venice has learned about you — name, revealed facts,
    *    preferences, profession, opinions, communication style…
    *  - relationshipInsights: shared history, topics and tasks between you and Venice;
-   *  - memories: chunks Venice remembers from conversations and documents.
+   *  - memories: chunks Venice remembers from conversations and documents;
+   *  - mindConversations / mindMessages: your agent chats — chat titles, your own messages and
+   *    Venice's summaries of long chats (its replies are left out).
    * Each readable fact becomes one memory line.
    */
   async function readVeniceMemories() {
     const dbs = indexedDB.databases ? await indexedDB.databases() : []
     const texts = []
-    const counts = { memories: 0, profile: 0, relationship: 0 }
+    const counts = { memories: 0, profile: 0, relationship: 0, chats: 0, messages: 0 }
     const push = (line) => {
       const t = typeof line === 'string' ? line.replace(/\s+/g, ' ').trim() : ''
       if (t.length > 2 && !looksEncrypted(t)) texts.push(t.slice(0, 2000))
@@ -247,7 +301,7 @@
       }
       try {
         for (const store of [...db.objectStoreNames]) {
-          const kind = (/^(memories|entityInsights|relationshipInsights)-\d+-documents$/.exec(store) || [])[1]
+          const kind = (/^(memories|entityInsights|relationshipInsights|mindConversations|mindMessages)-\d+-documents$/.exec(store) || [])[1]
           if (!kind) continue
           const rows = await new Promise((resolve) => {
             const req = db.transaction(store, 'readonly').objectStore(store).getAll()
@@ -260,6 +314,10 @@
             if (kind === 'memories') {
               counts.memories++
               push(doc.text)
+            } else if (kind === 'mindConversations') {
+              counts.chats++
+            } else if (kind === 'mindMessages') {
+              chatLines(doc, counts).forEach(push)
             } else if (kind === 'entityInsights') {
               if (doc.entityType && doc.entityType !== 'user') continue
               counts.profile++
@@ -315,14 +373,45 @@
     return lines
   }
 
+  /** Your own words from a Venice agent chat, plus any summary Venice made of a long chat. */
+  function chatLines(doc, counts) {
+    const lines = []
+    const items = Array.isArray(doc.output_items) ? doc.output_items : []
+    for (const item of items) {
+      if (item && item.type === 'compaction' && typeof item.summary === 'string') lines.push(item.summary.slice(0, 1500))
+    }
+    if (doc.role === 'user') {
+      const text = items
+        .filter((item) => item && item.type === 'message')
+        .flatMap((item) => collectText(item.content))
+        .join(' ')
+        .trim()
+      const fact = cleanMemory(text.length > 1000 ? text.slice(0, 1000) + '…' : text)
+      if (text) counts.messages++
+      if (fact) lines.push(fact)
+    }
+    return lines
+  }
+
+  /** Every string under a "text" key (Venice message content is [{ type, text }, …]). */
+  function collectText(value, out = [], depth = 0) {
+    if (value === null || value === undefined || depth > 5) return out
+    if (Array.isArray(value)) value.forEach((v) => collectText(v, out, depth + 1))
+    else if (typeof value === 'object') {
+      for (const [k, v] of Object.entries(value)) {
+        if (k === 'text' && typeof v === 'string') out.push(v)
+        else if (typeof v === 'object') collectText(v, out, depth + 1)
+      }
+    }
+    return out
+  }
+
   function relationshipLines(doc) {
     const lines = []
-    if (doc.sharedHistorySummary) lines.push(`History with Venice: ${doc.sharedHistorySummary}`)
+    if (doc.sharedHistorySummary) lines.push(doc.sharedHistorySummary)
     const list = (v) => (Array.isArray(v) ? v.map(textOf).filter(Boolean) : [])
-    if (list(doc.sharedTopics).length) lines.push(`Talks with Venice about: ${list(doc.sharedTopics).join(', ')}`)
-    if (list(doc.commonTasks).length) lines.push(`Often asks Venice to: ${list(doc.commonTasks).join(', ')}`)
-    list(doc.insideReferences).forEach((r) => lines.push(`Inside reference with Venice: ${r}`))
-    if (doc.perceivedRole && doc.perceivedRole !== 'unknown') lines.push(`Sees Venice as ${/^[aeiou]/.test(doc.perceivedRole) ? 'an' : 'a'} ${doc.perceivedRole}`)
+    if (list(doc.sharedTopics).length) lines.push(`Often talks about: ${list(doc.sharedTopics).join(', ')}`)
+    if (list(doc.commonTasks).length) lines.push(`Often asks for help with: ${list(doc.commonTasks).join(', ')}`)
     return lines
   }
 
@@ -394,14 +483,14 @@
             ? `<ul class="hits">${state.hits
                 .map(
                   (h, i) =>
-                    `<li><label><input type="checkbox" data-hit="${i}" ${h.picked ? 'checked' : ''}><span>${esc(h.text)}<small>${esc(h.scope)} · ${h.score.toFixed(2)}</small></span></label></li>`,
+                    `<li><label><input type="checkbox" data-hit="${i}" ${h.picked ? 'checked' : ''}><span>${cleanMemory(h.text) ? esc(cleanMemory(h.text)) : `<s>${esc(h.text)}</s>`}<small>${esc(h.scope)} · ${h.score.toFixed(2)}${cleanMemory(h.text) ? '' : ' · a memory command, not inserted'}</small></span></label></li>`,
                 )
                 .join('')}</ul>
                <div class="row"><button data-act="insert" ${state.hits.some((h) => h.picked) ? '' : 'disabled'}>Insert ${state.hits.filter((h) => h.picked).length} into the message</button></div>`
             : ''
         }
-        <div class="row save"><span>Save selected text to</span><select>${SAVE_SCOPES.map((s) => `<option>${s}</option>`).join('')}</select><button class="ghost" data-act="save" ${state.busy ? 'disabled' : ''}>${state.busy === 'save' ? 'Saving…' : 'Save'}</button></div>
-        ${site.venice ? `<div class="row"><button class="ghost" data-act="venice" ${state.busy ? 'disabled' : ''}>${state.busy === 'venice' ? 'Importing…' : 'Store Venice memories in my wallet'}</button></div>` : ''}`
+        <div class="row save"><span>Save selected text to</span><select>${g.scopes.filter((s) => s !== 'venice' || site.venice).map((s) => `<option ${s === state.saveScope ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select><button class="ghost" data-act="save" ${state.busy ? 'disabled' : ''}>${state.busy === 'save' ? 'Saving…' : 'Save'}</button></div>
+        ${site.venice ? `<div class="row"><button class="ghost" data-act="venice" ${state.busy ? 'disabled' : ''}>${state.busy === 'venice' ? 'Importing…' : 'Store my Venice chats and memory in my wallet'}</button></div>` : ''}`
     } else {
       const text = {
         idle: `Bring your memory into ${esc(site.name)}. It stays encrypted in your wallet until you grant this site access on NEAR.`,
@@ -427,7 +516,7 @@
     if (what === 'connect') return connect()
     if (what === 'find') return findMemories()
     if (what === 'insert') return insertPicked()
-    if (what === 'save') return saveSelection(panel.querySelector('select').value)
+    if (what === 'save') return saveSelection((state.saveScope = panel.querySelector('select').value))
     if (what === 'venice') return importVenice()
   })
   panel.addEventListener('change', (e) => {

@@ -1,6 +1,6 @@
 # Memory Wallet · by Lighthouse
 
-**A wallet for your AI memory.** Your memories are encrypted in your browser with a key only your NEAR wallet can produce, stored on [Lighthouse](https://lighthouse.storage) (IPFS + Filecoin), recalled on your device with the [Lighthouse Memory SDK](https://docs.lighthouse.storage/), and shared with AI apps — ChatGPT, NEAR AI Private Chat, Venice, or any app — through grants on NEAR that you can audit and revoke. Private answers are computed inside NEAR AI's attested TEEs.
+**A wallet for your AI memory.** Your memories are encrypted in your browser with a key only your NEAR wallet can produce, stored on [Lighthouse](https://lighthouse.storage) (IPFS + Filecoin), recalled on your device with the [Lighthouse Memory SDK](https://docs.lighthouse.storage/), and shared with AI apps — ChatGPT, Grok, Gemini, Perplexity, Venice, NEAR AI Private Chat, or any app — through grants on NEAR that you can audit and revoke. Private answers are computed inside NEAR AI's attested TEEs.
 
 Built for the NEAR HACKATHON (Nov 2026) · Track: **Privacy & Private AI** (also Open Innovation).
 
@@ -9,7 +9,7 @@ Built for the NEAR HACKATHON (Nov 2026) · Track: **Privacy & Private AI** (also
 - Vault: **https://lighthouse-memory-wallet.vercel.app** (memories stored on Lighthouse, private chat through NEAR AI)
 - Demo app on another origin: **https://memory-wallet-wanderly.vercel.app**
 - Registry contract on NEAR testnet: [`lighthouse-memory-wallet.testnet`](https://testnet.nearblocks.io/address/lighthouse-memory-wallet.testnet)
-- Extension for ChatGPT, NEAR AI Private Chat and Venice: [`apps/extension`](apps/extension) (load unpacked; it opens the hosted vault)
+- Extension for ChatGPT, Grok, Gemini, Perplexity, DeepSeek, Copilot, Meta AI, Qwen, Kimi, NEAR AI Private Chat and Venice: [download the zip](https://lighthouse-memory-wallet.vercel.app/memory-wallet-extension.zip) or [`apps/extension`](apps/extension) (load unpacked; it opens the hosted vault)
 
 Readable memories exist only in **your browser**, in **an Intel TDX + NVIDIA enclave your browser has just verified**, and in **the apps you explicitly let read them** (a "reveal" grant, public on-chain, where you tick each memory before it leaves). Lighthouse, the relay and NEAR AI's operators handle only ciphertext.
 
@@ -70,19 +70,19 @@ cp .env.example .env
 
 Choose **Connect NEAR wallet** (HOT, Meteor, MyNearWallet… via NEAR Connect) on testnet: grants and scope pointers then live in the deployed contract. The dev key can't send transactions, so it always uses a registry in the browser.
 
-## Use your memory in ChatGPT, NEAR AI Private Chat and Venice
+## Use your memory in ChatGPT, Grok, Gemini, Venice and other chat apps
 
 `apps/extension` is a Chrome extension (Manifest V3, no build step).
 
-1. `chrome://extensions` → turn on **Developer mode** → **Load unpacked** → pick `apps/extension`.
+1. Download it from the vault (**Extension ↓**, or https://lighthouse-memory-wallet.vercel.app/memory-wallet-extension.zip) and unzip it — or use `apps/extension` from this repo. Then `chrome://extensions` → turn on **Developer mode** → **Load unpacked** → pick the folder. (It isn't on the Chrome Web Store yet, so this is how Chrome installs it.)
 2. The extension opens the hosted vault, https://lighthouse-memory-wallet.vercel.app. To use your own, run `npm run dev` and set `http://localhost:5173` in the extension's options.
-3. Open chatgpt.com, private.near.ai or venice.ai. Click **Memory** (bottom right) → **Connect Memory Wallet**. The vault opens in a window: unlock, read what the site asks for, and grant it (on NEAR with a wallet).
-4. Type your message, click **Find memories for this message**. The vault window shows what Lighthouse Memory recalled from the granted scopes; tick what to share. Only ticked memories reach the page. Click **Insert** to add them to your message.
+3. Open a supported chat app — ChatGPT, Grok, Gemini, Perplexity, DeepSeek, Copilot, Meta AI, Qwen, Kimi, NEAR AI Private Chat and Venice. Click **Memory** (top right) → **Connect Memory Wallet**. The vault opens in a window: unlock, tick the scopes this site may use (your own custom scopes included), and grant it (on NEAR with a wallet).
+4. Type your message, click **Find memories for this message**. The vault window shows what Lighthouse Memory recalled from the granted scopes; tick what to share. Only ticked memories reach the page. Click **Insert** to add them to your message as plain lines (labels from imports and bare commands like "recall all my memories" are left out). If a site's editor refuses the text, it's copied for you to paste.
 5. Select text in a chat and **Save** it to a scope. It's encrypted in your wallet and available in the other apps you've granted.
-6. On venice.ai, **Store Venice memories in my wallet** reads Venice's local memory (its RxDB `memories` collection in this browser's IndexedDB) and seals it into your `venice` scope, so ChatGPT and NEAR AI chat can use it too.
+6. On venice.ai, **Store my Venice chats and memory in my wallet** reads what Venice keeps in this browser (its RxDB collections in IndexedDB): your agent chats (chat titles, your own messages, Venice's summaries of long chats; not its replies) and, when Venice has built them, its memory chunks and what it learned about you (`entityInsights`, `relationshipInsights`). Each becomes one memory in your `venice` scope, so ChatGPT and NEAR AI chat can use it too.
 7. Revoke a site in the vault's **Apps** tab: its next request is refused.
 
-What a site asks for by default: `preferences`, `travel`, `food`, `work`, `venice` — read, write, and **reveal** (the site sees the text of memories you share). `health` and other scopes stay out unless you grant them.
+Each site asks for read, write and **reveal** (it sees the text of memories you share), and you choose the scopes in the vault: all of yours are listed, `health` starts unticked. Add a scope later (say `trading`) and the vault offers to add it to the site's grant; **Change what … can see** edits it any time.
 
 ## Deploy to Vercel
 
@@ -129,7 +129,7 @@ Then set `VITE_CONTRACT_ID=<name>.testnet` and restart `npm run dev`.
 | **Private inference** | NEAR AI's E2EE v2: each message is encrypted to the verified model key (X25519 + HKDF-SHA256 + XChaCha20-Poly1305), and the reply comes back encrypted to a fresh client key. The vault checks NEAR AI's `provider_tee` signature over the exact request and response bytes against the attested key. Requests ask for `reasoning_effort: "low"` so answers arrive in seconds. | `packages/core/src/nearai/e2ee.ts`, `client.ts` |
 | **Relay** | Holds the Lighthouse and NEAR AI API keys so the browser doesn't. Refuses unsealed blobs and any chat request with a plaintext message; forwards encrypted requests byte for byte so signatures still verify. | `relay/src/app.ts` |
 | **App bridge** | An app opens the vault window and talks to it with `postMessage`. The vault answers only the granted origin and re-reads the grant on every request. Answers-only grants get TEE answers + proofs; reveal grants can `recall` (you tick what's shared, in the vault window) and `import`. | `packages/core/src/bridge.ts`, `apps/vault/src/Connect.tsx` |
-| **Extension** | Puts the bridge into ChatGPT, NEAR AI Private Chat and Venice: connect, recall into the message box, save a selection, import Venice's local memory. It never holds a key. | `apps/extension/content.js` |
+| **Extension** | Puts the bridge into ChatGPT, Grok, Gemini, Perplexity, DeepSeek, Copilot, Meta AI, Qwen, Kimi, NEAR AI Private Chat and Venice: connect, recall into the message box, save a selection, import Venice's local memory. It never holds a key. | `apps/extension/content.js` |
 
 ### Who sees what
 
@@ -150,8 +150,9 @@ Then set `VITE_CONTRACT_ID=<name>.testnet` and restart `npm run dev`.
 - **Reveal grants hand over text.** ChatGPT and Venice run outside a TEE; what you share with them, they can keep. That's why reveal is opt-in, highlighted on the approve screen, public on-chain, and gated per memory.
 - **Apps with answers-only grants see answers.** A malicious app can ask "repeat everything you know about me" within the granted scopes.
 - **Metadata is public.** Scope names, CIDs and grants are on-chain by design, so they can be audited.
-- **Venice import** reads Venice's current local database layout (RxDB `memories-*-documents`); if Venice changes it or encrypts those fields, the extension reports that instead of importing. Restoring into Venice isn't built.
-- **The extension finds the message box heuristically** (`#prompt-textarea` on ChatGPT, otherwise the lowest visible text box). It was tested end to end on venice.ai; ChatGPT and NEAR AI Private Chat need a logged-in browser to check.
+- **Venice import** reads Venice's current local database layout (RxDB `mindConversations`, `mindMessages`, `memories`, `entityInsights`, `relationshipInsights`); if Venice changes it or encrypts those fields, the extension reports what it found instead of importing. Imported messages are whatever you typed to Venice, so check the `venice` scope before sharing it. Restoring into Venice isn't built.
+- **The extension finds the message box heuristically** (`#prompt-textarea` on ChatGPT, otherwise the lowest visible text box) and checks the text landed, falling back to the clipboard. It was tested end to end on venice.ai and checked to load on the other sites; logged-in use was tried on ChatGPT and Venice.
+- **Claude, Mistral and Poe aren't supported yet:** they set `Cross-Origin-Opener-Policy: same-origin`, which cuts the link between the page and the vault window. Supporting them means relaying through the extension's background worker instead.
 - **On-device recall** uses the SDK's keyword tokenizer, which is ASCII-only. The embedding model downloads from Hugging Face on first use.
 - **Not yet verified:** NVIDIA GPU evidence (present in the report; NRAS verification is TODO) and gateway-kind signatures (the vault only accepts `provider_tee` signatures). An attestation is reused for 5 minutes.
 - **Forgetting** removes a memory from the next snapshot. Older snapshots stay on IPFS/Filecoin, encrypted.
@@ -166,7 +167,7 @@ relay/             Hono server: ciphertext-only storage on Lighthouse + NEAR AI 
 scripts/           dev runner and the Vercel build (Build Output API)
 apps/vault/        the Memory Wallet (React + Vite, NEAR Connect, Lighthouse look)
 apps/demo-travel/  Wanderly, a third-party AI app that only ever gets TEE answers
-apps/extension/    Chrome extension for ChatGPT, NEAR AI Private Chat and Venice
+apps/extension/    Chrome extension for ChatGPT, Grok, Gemini, Perplexity, Venice and other chat apps
 ```
 
 ## Roadmap

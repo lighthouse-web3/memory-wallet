@@ -23,6 +23,7 @@ if (target === 'vault') {
   const out = `${root}.vercel/output`
   rmSync(out, { recursive: true, force: true })
 
+  execFileSync('node', ['scripts/pack-extension.mjs'], { cwd: root, stdio: 'inherit' })
   viteBuild('apps/vault', { VITE_RELAY_URL: '/api' })
   cpSync(`${root}apps/vault/dist`, `${out}/static`, { recursive: true })
 

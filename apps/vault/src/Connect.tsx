@@ -1,4 +1,4 @@
-import { MAX_MEMORY_CHARS, rankMemories, SCOPE_PATTERN, isBridgeMessage, type AppToVault, type ChatMessage, type ConnectRequest, type Grant, type VaultToApp } from '@memory-wallet/core'
+import { ANY_SCOPE, MAX_MEMORY_CHARS, rankMemories, SCOPE_PATTERN, isBridgeMessage, type AppToVault, type ChatMessage, type ConnectRequest, type Grant, type VaultToApp } from '@memory-wallet/core'
 import { useEffect, useRef, useState } from 'react'
 import { TopBar } from './Brand.tsx'
 import { embedQuery } from './embedder.ts'
@@ -29,7 +29,12 @@ const TTL_CHOICES = [
 ]
 
 const covers = (g: Grant | null, req: ConnectRequest) =>
-  !!g && req.scopes.every((s) => g.scopes.includes(s)) && (!req.write || g.write) && (!req.reveal || !!g.reveal)
+  !!g && req.scopes.every((s) => s === ANY_SCOPE || g.scopes.includes(s)) && (!req.write || g.write) && (!req.reveal || !!g.reveal)
+
+/** Left unticked by default when an app lets you choose. */
+const SENSITIVE = new Set(['health'])
+const STARTER_SCOPES = ['preferences', 'travel', 'food', 'work']
+const MAX_GRANT_SCOPES = 16
 
 const MAX_IMPORT = 500
 
@@ -54,10 +59,23 @@ export function ConnectScreen({ u, request }: { u: Unlocked; request: ConnectReq
   const [error, setError] = useState('')
   const [log, setLog] = useState<LogLine[]>([])
   const [share, setShare] = useState<ShareRequest | null>(null)
+  const [picked, setPicked] = useState<string[]>([])
   const owner = u.wallet.accountId
+  const choose = !!request?.scopes.includes(ANY_SCOPE)
+  const required = request?.scopes.filter((s) => s !== ANY_SCOPE) ?? []
+  /** Every scope you can hand this app: yours (custom ones too), what it asks for, what it already has. */
+  const choosable = (g: Grant | null) => {
+    const mine = u.vault.scopeNames()
+    return [...new Set([...(mine.length ? mine : STARTER_SCOPES), ...required, ...(g?.scopes ?? [])])].sort()
+  }
+  const startPicking = (g: Grant | null, extra: string[] = []) => {
+    setPicked(g ? [...new Set([...g.scopes, ...required, ...extra])] : choosable(null).filter((s) => !SENSITIVE.has(s) || required.includes(s)))
+    setPhase('approve')
+  }
+  const newScopes = choose && grant ? u.vault.scopeNames().filter((s) => !grant.scopes.includes(s) && !SENSITIVE.has(s)) : []
   const addLog = (text: string, ok = true) => setLog((l) => [{ at: Date.now(), text, ok }, ...l].slice(0, 30))
 
-  const badScopes = request?.scopes.filter((s) => !SCOPE_PATTERN.test(s)) ?? []
+  const badScopes = request?.scopes.filter((s) => s !== ANY_SCOPE && !SCOPE_PATTERN.test(s)) ?? []
 
   useEffect(() => {
     if (!request || badScopes.length) return setPhase('invalid')
@@ -65,7 +83,8 @@ export function ConnectScreen({ u, request }: { u: Unlocked; request: ConnectReq
       .getGrant(owner, request.app)
       .then((g) => {
         setGrant(g)
-        setPhase(covers(g, request) ? 'ready' : 'approve')
+        if (covers(g, request)) setPhase('ready')
+        else startPicking(g)
       })
       .catch((err) => setError(errorText(err)))
   }, [])
@@ -74,9 +93,14 @@ export function ConnectScreen({ u, request }: { u: Unlocked; request: ConnectReq
     if (!request) return
     setBusy(true)
     setError('')
+    const scopes = choose ? picked : request.scopes
+    if (!scopes.length || scopes.length > MAX_GRANT_SCOPES) {
+      setBusy(false)
+      return setError(`Pick 1 to ${MAX_GRANT_SCOPES} scopes.`)
+    }
     try {
       await u.registry.submit(owner, [
-        { method: 'grant', args: { app: request.app, scopes: request.scopes, write: request.write, ttl_minutes: ttl, reveal: !!request.reveal } },
+        { method: 'grant', args: { app: request.app, scopes, write: request.write, ttl_minutes: ttl, reveal: !!request.reveal } },
       ])
       const g = await u.registry.getGrant(owner, request.app)
       setGrant(g)
@@ -234,9 +258,30 @@ export function ConnectScreen({ u, request }: { u: Unlocked; request: ConnectReq
           <h1>{request.name} wants to use your memory</h1>
           <p className="origin mono">{request.app}</p>
           <ul className="ask">
-            <li>
-              Scopes: <b>{request.scopes.join(', ')}</b> ({request.scopes.map((s) => `${u.vault.memories([s]).length} in ${s}`).join(', ')})
-            </li>
+            {choose ? (
+              <li>
+                Pick what it can use:
+                <div className="scope-choice">
+                  {choosable(grant).map((s) => (
+                    <label key={s}>
+                      <input
+                        type="checkbox"
+                        checked={picked.includes(s)}
+                        disabled={required.includes(s)}
+                        onChange={(e) => setPicked(e.target.checked ? [...picked, s] : picked.filter((x) => x !== s))}
+                      />
+                      <span>
+                        {s} <small className="muted">{u.vault.memories([s]).length}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </li>
+            ) : (
+              <li>
+                Scopes: <b>{request.scopes.join(', ')}</b> ({request.scopes.map((s) => `${u.vault.memories([s]).length} in ${s}`).join(', ')})
+              </li>
+            )}
             <li>{request.write ? 'It can also add memories to these scopes.' : 'Read only.'}</li>
             {request.reveal ? (
               <li className="warn">
@@ -254,7 +299,7 @@ export function ConnectScreen({ u, request }: { u: Unlocked; request: ConnectReq
               </label>
             ))}
           </div>
-          <button disabled={busy} onClick={approve}>
+          <button disabled={busy || (choose && !picked.length)} onClick={approve}>
             {busy ? 'Waiting for the wallet…' : u.registry.kind === 'near' ? 'Grant on NEAR' : 'Grant (dev registry)'}
           </button>
         </>
@@ -268,6 +313,19 @@ export function ConnectScreen({ u, request }: { u: Unlocked; request: ConnectReq
             {grant.reveal ? ' · sees memory text' : ' · TEE answers only'} · expires {relative(grant.expires_at_ms)}. Keep this window open
             while you use the app.
           </p>
+          {newScopes.length > 0 && (
+            <p className="hint">
+              New since you granted: <b>{newScopes.join(', ')}</b>.{' '}
+              <button className="ghost small" onClick={() => startPicking(grant, newScopes)}>
+                Add to {request.name}
+              </button>
+            </p>
+          )}
+          {choose && (
+            <button className="ghost small" onClick={() => startPicking(grant)}>
+              Change what {request.name} can see
+            </button>
+          )}
         </>
       )}
 

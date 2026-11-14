@@ -11,3 +11,5 @@ contract/target/
 # Vercel: link info and prebuilt output (scripts/vercel-build.mjs)
 .vercel/
 .env*.local
+# Built by scripts/pack-extension.mjs
+apps/vault/public/memory-wallet-extension.zip

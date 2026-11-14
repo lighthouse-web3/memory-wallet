@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Footer, TopBar } from './Brand.tsx'
+import { ExtensionCard, Footer, TopBar } from './Brand.tsx'
 import { config } from './config.ts'
 import { errorText } from './format.ts'
 import { unlock, type Unlocked } from './session.ts'
@@ -99,6 +99,7 @@ export function UnlockScreen(props: {
           prompt to that enclave's key.
         </li>
       </ol>
+      {!props.forApp && <ExtensionCard />}
       <Footer />
     </main>
   )

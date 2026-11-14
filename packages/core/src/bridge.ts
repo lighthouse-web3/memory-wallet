@@ -14,6 +14,9 @@ import type { ChatMessage, SignatureCheck } from './nearai/client.ts'
  * like ChatGPT through the browser extension.
  */
 
+/** As a requested scope: let the user pick any of their scopes (custom ones included) in the vault. */
+export const ANY_SCOPE = '*'
+
 export interface ConnectRequest {
   /** The app's origin, e.g. http://localhost:5174 — must equal the opener's real origin. */
   app: string
