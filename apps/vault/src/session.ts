@@ -53,6 +53,7 @@ export async function unlock(wallet: WalletSession): Promise<Unlocked> {
   }
   const vault = new Vault(keys, new RelayBlobStore(config.relayUrl))
   const loadErrors = record ? await vault.load(record.roots) : []
+  void embedder.warm(0) // start loading the embedding model in the background
   return { wallet, keys, vault, registry, record, loadErrors }
 }
 
@@ -62,10 +63,12 @@ export async function unlock(wallet: WalletSession): Promise<Unlocked> {
  * memories are saved without vectors and recall falls back to keywords.
  */
 export async function save(u: Unlocked): Promise<{ txHash?: string; scopes: string[]; embedded: number }> {
-  const embedded = await u.vault.embedMissing(embedder).catch((err) => {
-    console.warn('Lighthouse Memory embedder unavailable; saving without vectors:', err)
-    return 0
-  })
+  const embedded = (await embedder.warm(15_000))
+    ? await u.vault.embedMissing(embedder).catch((err) => {
+        console.warn('Lighthouse Memory embedder failed; saving without vectors:', err)
+        return 0
+      })
+    : 0
   const roots = await u.vault.prepareSave()
   const calls: RegistryCall[] = []
   if (!u.record?.check) calls.push({ method: 'set_check', args: { check: u.keys.check } })

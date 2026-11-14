@@ -179,6 +179,8 @@
     const block = ['Context from my Memory Wallet (shared by me):', ...picked.map((h) => `- ${h.text}`)].join('\n')
     insert(el, block)
     note(`Inserted ${picked.length} ${picked.length === 1 ? 'memory' : 'memories'}. ${site.tee ? '' : `${site.name} will see them when you send.`}`)
+    panel.hidden = true
+    el.focus()
   }
 
   async function saveSelection(scope) {
@@ -194,11 +196,13 @@
   async function importVenice() {
     await run('venice', async () => {
       const found = await readVeniceMemories()
+      const c = found.counts
+      const seen = `${c.memories} memory ${c.memories === 1 ? 'chunk' : 'chunks'}, ${c.profile} profile and ${c.relationship} relationship ${c.profile + c.relationship === 1 ? 'record' : 'records'}`
       if (!found.texts.length) {
         return note(
-          found.total
-            ? `Found ${found.total} Venice memories, but they are encrypted by Venice in this browser and could not be read.`
-            : 'No Venice memories in this browser yet. Turn on Memory in Venice and chat a little first.',
+          c.memories + c.profile + c.relationship
+            ? `Found ${seen} in Venice's storage here, but no readable text (Venice may encrypt them in this browser).`
+            : "Venice hasn't stored any memory in this browser yet (checked its memories, profile insights and relationship insights). Chat a little with Memory on, then try again.",
           'bad',
         )
       }
@@ -209,25 +213,42 @@
         added += res.added
         skipped += res.skipped
       }
-      note(`Stored ${added} Venice memories in your wallet, encrypted${skipped ? `; ${skipped} were already there` : ''}.`)
+      note(`Read ${seen} from Venice. Stored ${added} memories in your wallet, encrypted${skipped ? `; ${skipped} were already there` : ''}.`)
     })
   }
 
-  /** Venice keeps its memory in an RxDB database in this browser (IndexedDB, "memories" collection). */
+  /**
+   * Venice keeps its memory in RxDB collections in this browser's IndexedDB:
+   *  - entityInsights (entityType "user"): what Venice has learned about you — name, revealed facts,
+   *    preferences, profession, opinions, communication style…
+   *  - relationshipInsights: shared history, topics and tasks between you and Venice;
+   *  - memories: chunks Venice remembers from conversations and documents.
+   * Each readable fact becomes one memory line.
+   */
   async function readVeniceMemories() {
     const dbs = indexedDB.databases ? await indexedDB.databases() : []
-    const names = dbs.map((d) => d.name).filter((n) => /venice-rx-db/i.test(n || ''))
     const texts = []
-    let total = 0
-    for (const name of names) {
-      const db = await new Promise((resolve, reject) => {
-        const req = indexedDB.open(name)
-        req.onsuccess = () => resolve(req.result)
-        req.onerror = () => reject(req.error)
-      })
+    const counts = { memories: 0, profile: 0, relationship: 0 }
+    const push = (line) => {
+      const t = typeof line === 'string' ? line.replace(/\s+/g, ' ').trim() : ''
+      if (t.length > 2 && !looksEncrypted(t)) texts.push(t.slice(0, 2000))
+    }
+    for (const { name } of dbs) {
+      if (!name) continue
+      let db
       try {
-        const stores = [...db.objectStoreNames].filter((s) => /^memories-\d+-documents$/.test(s))
-        for (const store of stores) {
+        db = await new Promise((resolve, reject) => {
+          const req = indexedDB.open(name)
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+      } catch {
+        continue
+      }
+      try {
+        for (const store of [...db.objectStoreNames]) {
+          const kind = (/^(memories|entityInsights|relationshipInsights)-\d+-documents$/.exec(store) || [])[1]
+          if (!kind) continue
           const rows = await new Promise((resolve) => {
             const req = db.transaction(store, 'readonly').objectStore(store).getAll()
             req.onsuccess = () => resolve(req.result || [])
@@ -236,17 +257,75 @@
           for (const row of rows) {
             const doc = row && (row.d || row)
             if (!doc || doc._deleted) continue
-            total++
-            const text = typeof doc.text === 'string' ? doc.text.trim() : ''
-            if (text && !looksEncrypted(text)) texts.push(text)
+            if (kind === 'memories') {
+              counts.memories++
+              push(doc.text)
+            } else if (kind === 'entityInsights') {
+              if (doc.entityType && doc.entityType !== 'user') continue
+              counts.profile++
+              profileLines(doc).forEach(push)
+            } else {
+              counts.relationship++
+              relationshipLines(doc).forEach(push)
+            }
           }
         }
       } finally {
         db.close()
       }
     }
-    return { texts: [...new Set(texts)], total }
+    return { texts: [...new Set(texts)], counts }
   }
+
+  const humanize = (k) => k.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toLowerCase()
+  const SKIP_KEY = /^(_.*|id|ownerId|owner_id|characterId|entityType|entity[12]Id|createdAt.*|updatedAt.*|lastInteraction.*|.*UnixTimestamp|sessionCount|embedding)$/
+  const textOf = (v) =>
+    typeof v === 'string' ? v : v && typeof v === 'object' ? v.fact || v.text || v.content || v.statement || v.value || v.description || v.topic || v.task || v.name || '' : ''
+
+  /** Turns a nested value into "Label: value" lines (depth-limited). */
+  function flatten(value, label, depth = 0, out = []) {
+    if (value === null || value === undefined || value === '' || out.length > 120) return out
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      out.push(`${label}: ${value}`)
+    } else if (Array.isArray(value)) {
+      const simple = value.map(textOf).filter((t) => typeof t === 'string' && t.trim())
+      if (simple.length === value.length && simple.length) out.push(`${label}: ${simple.join(', ')}`)
+      else if (depth < 3) value.forEach((v) => flatten(v, label, depth + 1, out))
+    } else if (typeof value === 'object' && depth < 3) {
+      for (const [k, v] of Object.entries(value)) if (!SKIP_KEY.test(k)) flatten(v, `${label}, ${humanize(k)}`, depth + 1, out)
+    }
+    return out
+  }
+
+  function profileLines(doc) {
+    const lines = []
+    if (doc.name) lines.push(`Name: ${doc.name}`)
+    if (doc.nickname) lines.push(`Goes by ${doc.nickname}`)
+    for (const f of Array.isArray(doc.revealedFacts) ? doc.revealedFacts : []) {
+      const t = textOf(f)
+      if (t) lines.push(t)
+      else flatten(f, 'Fact', 0, lines)
+    }
+    const labels = {
+      profession: 'Work', preferences: 'Preference', opinions: 'Opinion', communicationStyle: 'Communication style',
+      boundaries: 'Boundaries', demographics: 'About me', education: 'Education', personalityTraits: 'Personality',
+      personalityProfile: 'Personality', physicalAppearance: 'Appearance', originStory: 'Background', selfConcept: 'Self-image', tagline: 'Tagline',
+    }
+    for (const [key, label] of Object.entries(labels)) flatten(doc[key], label, 0, lines)
+    return lines
+  }
+
+  function relationshipLines(doc) {
+    const lines = []
+    if (doc.sharedHistorySummary) lines.push(`History with Venice: ${doc.sharedHistorySummary}`)
+    const list = (v) => (Array.isArray(v) ? v.map(textOf).filter(Boolean) : [])
+    if (list(doc.sharedTopics).length) lines.push(`Talks with Venice about: ${list(doc.sharedTopics).join(', ')}`)
+    if (list(doc.commonTasks).length) lines.push(`Often asks Venice to: ${list(doc.commonTasks).join(', ')}`)
+    list(doc.insideReferences).forEach((r) => lines.push(`Inside reference with Venice: ${r}`))
+    if (doc.perceivedRole && doc.perceivedRole !== 'unknown') lines.push(`Sees Venice as ${/^[aeiou]/.test(doc.perceivedRole) ? 'an' : 'a'} ${doc.perceivedRole}`)
+    return lines
+  }
+
   const looksEncrypted = (t) => /^U2FsdGVkX1/.test(t) || (t.length > 40 && !/\s/.test(t) && /^[A-Za-z0-9+/=_-]+$/.test(t))
 
   async function run(label, fn) {
@@ -280,6 +359,17 @@
     panel.hidden = !panel.hidden
     render()
   })
+  // Behave like a popover: a click anywhere on the page closes the panel (and still reaches what
+  // was clicked, e.g. the chat box), so the panel never sits between you and the chat.
+  document.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (!panel.hidden && !e.composedPath().includes(host)) {
+        panel.hidden = true
+      }
+    },
+    true,
+  )
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
   const until = (ms) => {
@@ -346,7 +436,7 @@
     state.hits[Number(i)].picked = e.target.checked
     render()
   })
-  // Keep the page's text selection when clicking our buttons.
+  // Keep the page's text selection (for Save) when clicking our buttons.
   panel.addEventListener('mousedown', (e) => {
     if (e.target.closest && e.target.closest('button')) e.preventDefault()
   })
@@ -355,12 +445,12 @@
     return `
       :host { all: initial; font-family: 'DM Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; }
       * { box-sizing: border-box; font-family: inherit; }
-      .launcher { font: inherit; position: fixed; right: 18px; bottom: 112px; z-index: 2147483646; display: inline-flex; align-items: center; gap: 8px;
+      .launcher { font: inherit; position: fixed; right: 18px; top: 76px; z-index: 2147483646; display: inline-flex; align-items: center; gap: 8px;
         padding: 10px 14px; border-radius: 12px; border: 1px solid #cebbe24d; color: #f4f2f7; font-size: 13px; font-weight: 600;
         background: linear-gradient(135deg, #2a2338f2, #17161cf2); box-shadow: 0 10px 40px #0006; cursor: pointer; }
       .launcher:hover { border-color: #d4baff90; }
       .dot { width: 8px; height: 8px; border-radius: 50%; background: #d5b5ff; box-shadow: 0 0 14px #c794ff; flex-shrink: 0; }
-      .panel { position: fixed; right: 18px; bottom: 164px; z-index: 2147483647; width: 360px; max-height: min(620px, 75vh); overflow: auto;
+      .panel { position: fixed; right: 18px; top: 124px; z-index: 2147483647; width: 340px; max-height: min(560px, calc(100vh - 150px)); overflow: auto;
         padding: 16px; border-radius: 18px; color: #f4f2f7; font-size: 13px; line-height: 1.5;
         background: linear-gradient(135deg, #ffffff0a, #ffffff02 45%), #141219f2; border: 1px solid #d0b7fb33;
         box-shadow: inset 0 1px #ffffff0d, 0 24px 70px #000a; backdrop-filter: blur(24px); }

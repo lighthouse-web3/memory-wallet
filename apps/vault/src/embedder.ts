@@ -31,6 +31,19 @@ class BrowserEmbedder implements Embedder {
     return this.pipe
   }
 
+  /**
+   * Starts loading the model (if it isn't already) and waits at most `ms` for it. A slow or blocked
+   * download must never hold up a save or a recall: callers fall back to keywords and embed later.
+   */
+  async warm(ms: number): Promise<boolean> {
+    if (this.status === 'ready') return true
+    const loading = this.load().then(
+      () => true,
+      () => false,
+    )
+    return Promise.race([loading, new Promise<boolean>((r) => setTimeout(() => r(false), ms))])
+  }
+
   async embed(texts: string[]): Promise<number[][]> {
     if (!texts.length) return []
     const pipe = await this.load()
@@ -43,6 +56,7 @@ export const embedder = new BrowserEmbedder()
 
 /** A query vector, or null when the model can't load (offline): recall then ranks by keywords. */
 export async function embedQuery(text: string): Promise<QueryVector | null> {
+  if (!(await embedder.warm(8_000))) return null
   try {
     const [vector] = await embedder.embed([text])
     return vector ? { vector, model: embedder.id } : null
